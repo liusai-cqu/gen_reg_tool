@@ -58,6 +58,7 @@ def generate_verilog(module_name, registers, apb_data_width):
     port_list = f"""
     input wire PCLK,
     input wire PRESETn,
+    input wire PSEL,
     input wire PENABLE,
     input wire [31:0] PADDR,
     input wire PWRITE,
@@ -78,9 +79,9 @@ def generate_verilog(module_name, registers, apb_data_width):
             field_width = field["WIDTH"]
 
             if reg_type == "RO":
-                port_list += f" input wire [{int(field_width) - 1}:0] {reg_name}_{field_name}_i,\n"
+                port_list += f"    input wire [{int(field_width) - 1}:0] {reg_name}_{field_name}_i,\n"
             else:
-                port_list += f" output wire [{int(field_width) - 1}:0] {reg_name}_{field_name}_o,\n"
+                port_list += f"    output wire [{int(field_width) - 1}:0] {reg_name}_{field_name}_o,\n"
 
     # Remove the last comma and newline
     port_list = port_list.rstrip(",\n") + "\n"
@@ -94,9 +95,9 @@ module {module_name} (
     # 寄存器地址定义
     address_definitions = ""
     for i, register in enumerate(registers):
-        address = register["ADDRESS"]
+        address = register["ADDRESS"].replace("0x", "32'h")
         reg_name = register["REG_NAME"]
-        address_definitions += f"localparam ADDR_{reg_name.upper()} = {address};\n"
+        address_definitions += f"    localparam ADDR_{reg_name.upper()} = {address};\n"
 
     # 内部信号定义
     internal_signals = f"""
