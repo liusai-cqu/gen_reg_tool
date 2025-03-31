@@ -11,24 +11,32 @@ def parse_xml(xml_file):
     namespace = {'ipxact': 'http://www.accellera.org/XMLSchema/IPXACT/1685-2014'}
     address_blocks = root.findall('.//ipxact:addressBlock', namespace)
 
-    for addr_block in address_blocks:
-        register_elements = addr_block.findall('.//ipxact:register', namespace)
-        for register in register_elements:
-            name = register.find('ipxact:name', namespace).text
+    # 检查 addressBlock 数量
+    if len(address_blocks) == 0:
+        print("错误：未找到任何 addressBlock。")
+        return [], ""
+    elif len(address_blocks) > 1:
+        print(f"警告：检测到 {len(address_blocks)} 个 addressBlock，仅解析第一个。")
 
-            offset_elem = register.find('ipxact:addressOffset', namespace)
-            offset = offset_elem.text if offset_elem is not None else "0x0"
+    # 解析第一个 addressBlock
+    address_block = address_blocks[0]
+    register_elements = address_block.findall('.//ipxact:register', namespace)
+    for register in register_elements:
+        name = register.find('ipxact:name', namespace).text
 
-            access_elem = register.find('ipxact:access', namespace)
-            access = access_elem.text if access_elem is not None else "unknown"
+        offset_elem = register.find('ipxact:addressOffset', namespace)
+        offset = offset_elem.text if offset_elem is not None else "0x0"
 
-            desc_elem = register.find('ipxact:description', namespace)
-            desc = desc_elem.text if desc_elem is not None else ""
+        access_elem = register.find('ipxact:access', namespace)
+        access = access_elem.text if access_elem is not None else "unknown"
 
-            reset_value_elem = register.find('.//ipxact:reset/ipxact:value', namespace)
-            reset_value = reset_value_elem.text if reset_value_elem is not None else "0x0"
+        desc_elem = register.find('ipxact:description', namespace)
+        desc = desc_elem.text if desc_elem is not None else ""
 
-            registers.append((name, offset, access, desc, reset_value))
+        reset_value_elem = register.find('.//ipxact:reset/ipxact:value', namespace)
+        reset_value = reset_value_elem.text if reset_value_elem is not None else "0x0"
+
+        registers.append((name, offset, access, desc, reset_value))
 
     memory_map_name = root.find('.//ipxact:memoryMap/ipxact:name', namespace).text
     module_name = memory_map_name.split('_')[0]
@@ -44,8 +52,21 @@ def generate_struct_code(registers, module_name):
     code += "typedef struct\n{\n"
 
     for name, offset, access, _, _ in registers:
-        access_type = "__IO" if access == "read-write" else "__I" if access == "read-only" else "__O"
-        code += f"    {access_type} uint32_t {name}; /* Offset: {offset} ({access}) */\n"
+        if access == "read-write":
+            access_type = "_IO"
+        elif access == "read-only":
+            access_type = "_O"
+        elif access == "write-only":
+            access_type = "_I"
+        elif access == "reserved":
+            access_type = ""
+        else:
+            access_type = ""
+
+        if access_type:
+            code += f"    {access_type} uint32_t {name}; /* Offset: {offset} ({access}) */\n"
+        else:
+            code += f"    uint32_t {name}; /* Offset: {offset} ({access}) */\n"
 
     code += f"}} {module_name}_TypeDef;\n\n"
 
@@ -62,13 +83,23 @@ def generate_test_code(registers, module_name):
     code += "#include <stdlib.h>\n"
     code += "#include <time.h>\n"
     code += f"#include \"{module_name}.h\"\n\n"
-    code += "// 假设的 read_reg 和 write_reg 函数\n"
+
+    # 定义 read_ahb32 和 write_ahb32 函数
+    code += "unsigned long read_ahb32(unsigned long ahb_addr) {\n"
+    code += "    volatile unsigned long retval;\n"
+    code += "    retval = *(volatile unsigned long *)ahb_addr;\n"
+    code += "    return retval;\n"
+    code += "}\n\n"
+    code += "void write_ahb32(unsigned long ahb_addr, volatile unsigned long write_value) {\n"
+    code += "    *(volatile unsigned long *)ahb_addr = write_value;\n"
+    code += "}\n\n"
+
+    # 重新定义 read_reg 和 write_reg 函数，使用 read_ahb32 和 write_ahb32
     code += "uint32_t read_reg(uint32_t address) {\n"
-    code += "    // 这里需要实现具体的读取逻辑\n"
-    code += "    return 0;\n"
+    code += "    return (uint32_t)read_ahb32((unsigned long)address);\n"
     code += "}\n\n"
     code += "void write_reg(uint32_t address, uint32_t value) {\n"
-    code += "    // 这里需要实现具体的写入逻辑\n"
+    code += "    write_ahb32((unsigned long)address, (volatile unsigned long)value);\n"
     code += "}\n\n"
 
     code += "void test_register_access() {\n"
@@ -90,6 +121,12 @@ def generate_test_code(registers, module_name):
             code += f"    if (read_val != rand_val) {{\n"
             code += f"        printf(\"Error: Read - write register {name} read - write test failed!\\n\");\n"
             code += "    }\n"
+        elif access == "write-only":
+            random_value = random.randint(0, 0xFFFFFFFF)
+            code += f"    uint32_t rand_val = {random_value};\n"
+            code += f"    write_reg(0x{offset}, rand_val);\n"
+            code += f"    printf(\"Write - only register {name} written with value 0x{random_value:08X}.\\n\");\n"
+            # 由于是只写寄存器，一般无法直接读取验证写入结果，这里简单打印写入信息
         elif access == "reserved":
             code += f"    uint32_t read_val = read_reg(0x{offset});\n"
             code += f"    if (read_val != 0) {{\n"
