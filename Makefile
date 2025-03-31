@@ -12,7 +12,7 @@ JSON2RAL_SCRIPT = json2ral_reg.py
 GET_MODULE_NAME = python3 -c 'import json; with open("$(JSON_FILE)", "r") as f: data = json.load(f); print(data["MODULE_NAME"])'
 
 # 默认文件名 (依赖于 MODULE_NAME)
-MODULE_NAME = deadbeaf#$(shell $(GET_MODULE_NAME))
+MODULE_NAME ?= deadbeaf#$(shell $(GET_MODULE_NAME))
 CHEADER_FILE ?= $(MODULE_NAME).h
 RAL_FILE ?= ral_$(MODULE_NAME).sv
 RTL_FILE ?= $(MODULE_NAME).v
