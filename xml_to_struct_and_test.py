@@ -46,12 +46,24 @@ def parse_xml(xml_file):
 
 # 生成寄存器结构体 C 代码
 def generate_struct_code(registers, module_name):
+    # 按偏移量排序寄存器
+    registers.sort(key=lambda x: int(x[1], 16))
+
     code = f"#ifndef {module_name}_H\n"
     code += f"#define {module_name}_H\n\n"
     code += f"/*------------------------------- MODULE_NAME: {module_name} -----------------------*/\n\n"
     code += "typedef struct\n{\n"
 
-    for name, offset, access, _, _ in registers:
+    prev_offset = 0
+    for i, (name, offset, access, _, _) in enumerate(registers):
+        current_offset = int(offset, 16)
+        if i > 0 and current_offset > prev_offset + 4:
+            # 计算需要插入的保留寄存器数量
+            num_reserved = (current_offset - prev_offset - 4) // 4
+            for j in range(num_reserved):
+                reserved_name = f"RESERVED_{prev_offset + 4 + j * 4:08X}"
+                code += f"    uint32_t {reserved_name}; /* Offset: 0x{prev_offset + 4 + j * 4:08X} (reserved) */\n"
+
         if access == "read-write":
             access_type = "_IO"
         elif access == "read-only":
@@ -68,6 +80,8 @@ def generate_struct_code(registers, module_name):
         else:
             code += f"    uint32_t {name}; /* Offset: {offset} ({access}) */\n"
 
+        prev_offset = current_offset
+
     code += f"}} {module_name}_TypeDef;\n\n"
 
     for name, offset, _, _, _ in registers:
@@ -78,7 +92,7 @@ def generate_struct_code(registers, module_name):
 
 
 # 生成寄存器读写属性测试 C 代码
-def generate_test_code(registers, module_name):
+def generate_test_code(registers, module_name, base_address):
     code = "#include <stdio.h>\n"
     code += "#include <stdlib.h>\n"
     code += "#include <time.h>\n"
@@ -102,40 +116,41 @@ def generate_test_code(registers, module_name):
     code += "    write_ahb32((unsigned long)address, (volatile unsigned long)value);\n"
     code += "}\n\n"
 
-    code += "void test_register_access() {\n"
+    code += "void test_register_access(uint32_t base_addr) {\n"
     code += "    srand(time(NULL));\n"
     for name, offset, access, _, reset_value in registers:
         if access == "read-only":
-            random_value = random.randint(0, 0xFFFFFFFF)
-            code += f"    uint32_t rand_val = {random_value};\n"
-            code += f"    write_reg(0x{offset}, rand_val);\n"
-            code += f"    uint32_t read_val = read_reg(0x{offset});\n"
+            code += f"    uint32_t rand_val = rand();\n"
+            code += f"    uint32_t reg_addr = base_addr + {offset};\n"
+            code += f"    write_reg(reg_addr, rand_val);\n"
+            code += f"    uint32_t read_val = read_reg(reg_addr);\n"
             code += f"    if (read_val != {reset_value}) {{\n"
             code += f"        printf(\"Error: Read - only register {name} write test failed!\\n\");\n"
             code += "    }\n"
         elif access == "read-write":
-            random_value = random.randint(0, 0xFFFFFFFF)
-            code += f"    uint32_t rand_val = {random_value};\n"
-            code += f"    write_reg(0x{offset}, rand_val);\n"
-            code += f"    uint32_t read_val = read_reg(0x{offset});\n"
+            code += f"    uint32_t rand_val = rand();\n"
+            code += f"    uint32_t reg_addr = base_addr + {offset};\n"
+            code += f"    write_reg(reg_addr, rand_val);\n"
+            code += f"    uint32_t read_val = read_reg(reg_addr);\n"
             code += f"    if (read_val != rand_val) {{\n"
             code += f"        printf(\"Error: Read - write register {name} read - write test failed!\\n\");\n"
             code += "    }\n"
         elif access == "write-only":
-            random_value = random.randint(0, 0xFFFFFFFF)
-            code += f"    uint32_t rand_val = {random_value};\n"
-            code += f"    write_reg(0x{offset}, rand_val);\n"
-            code += f"    printf(\"Write - only register {name} written with value 0x{random_value:08X}.\\n\");\n"
-            # 由于是只写寄存器，一般无法直接读取验证写入结果，这里简单打印写入信息
+            code += f"    uint32_t rand_val = rand();\n"
+            code += f"    uint32_t reg_addr = base_addr + {offset};\n"
+            code += f"    write_reg(reg_addr, rand_val);\n"
+            code += f"    printf(\"Write - only register {name} written with value 0x%08X.\\n\", rand_val);\n"
         elif access == "reserved":
-            code += f"    uint32_t read_val = read_reg(0x{offset});\n"
+            code += f"    uint32_t reg_addr = base_addr + {offset};\n"
+            code += f"    uint32_t read_val = read_reg(reg_addr);\n"
             code += f"    if (read_val != 0) {{\n"
             code += f"        printf(\"Error: Reserved register {name} read test failed!\\n\");\n"
             code += "    }\n"
     code += "    printf(\"All register access tests completed.\\n\");\n"
     code += "}\n\n"
     code += "int main() {\n"
-    code += "    test_register_access();\n"
+    code += f"    uint32_t base_addr = {base_address};\n"
+    code += "    test_register_access(base_addr);\n"
     code += "    return 0;\n"
     code += "}\n"
     return code
@@ -152,10 +167,12 @@ def main():
             return
         xml_file = os.path.join(current_dir, xml_files[0])
 
+    base_address = input("请输入寄存器基地址（十六进制，如 0x10000000）: ")
+
     registers, module_name = parse_xml(xml_file)
 
     struct_code = generate_struct_code(registers, module_name)
-    test_code = generate_test_code(registers, module_name)
+    test_code = generate_test_code(registers, module_name, base_address)
 
     with open(f"{module_name}.h", "w") as f:
         f.write(struct_code)
