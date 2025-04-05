@@ -7,15 +7,18 @@ MD2JSON_SCRIPT = md2json_reg.py
 JSON2RTL_SCRIPT = json2rtl_reg.py
 JSON2CHEADER_SCRIPT = json2cheader_reg.py
 JSON2RAL_SCRIPT = json2ral_reg.py
+JSON2CTEST_SCRIPT = json2ctest_reg.py
+BASE_ADDRESS ?= 0x10000000  # 寄存器基地址
 
 # 获取 MODULE_NAME 的函数 (需要 Python)
-GET_MODULE_NAME = python3 -c 'import json; with open("$(JSON_FILE)", "r") as f: data = json.load(f); print(data["MODULE_NAME"])'
+#GET_MODULE_NAME = python3 -c 'import json; with open("$(JSON_FILE)", "r") as f: data = json.load(f); print(data["MODULE_NAME"])'
 
 # 默认文件名 (依赖于 MODULE_NAME)
 MODULE_NAME ?= deadbeaf#$(shell $(GET_MODULE_NAME))
 CHEADER_FILE ?= $(MODULE_NAME).h
 RAL_FILE ?= ral_$(MODULE_NAME).sv
 RTL_FILE ?= $(MODULE_NAME).v
+TEST_CODE_FILE ?= $(MODULE_NAME)_test.c
 
 # VCS 编译器设置
 VCS = vcs
@@ -30,7 +33,7 @@ LOG_DIR ?= logs
 # 目标
 all: generate_output
 
-generate_output: generate_json generate_cheader generate_ral generate_rtl
+generate_output: generate_json generate_cheader generate_ral generate_rtl generate_ctest
 
 generate_json: $(MARKDOWN_FILE)
 	python3 $(MD2JSON_SCRIPT) $(MARKDOWN_FILE) --json_file $(JSON_FILE)
@@ -43,6 +46,11 @@ generate_ral: $(JSON_FILE)
 
 generate_rtl: $(JSON_FILE)
 	python3 $(JSON2RTL_SCRIPT) $(JSON_FILE) --verilog_file $(RTL_FILE)
+
+# 生成测试 C 代码
+generate_ctest: $(JSON_FILE)
+	python3 $(JSON2CTEST_SCRIPT) $(JSON_FILE) $(BASE_ADDRESS) --test_code_file $(TEST_CODE_FILE)
+	@echo "寄存器测试 C 代码已生成：$(TEST_CODE_FILE)"
 
 # 创建构建目录和日志目录
 $(BUILD_DIR) $(LOG_DIR):
