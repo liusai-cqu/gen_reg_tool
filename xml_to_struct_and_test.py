@@ -2,7 +2,6 @@ import xml.etree.ElementTree as ET
 import random
 import os
 
-
 # 解析 IPXACT 格式的 XML 文件
 def parse_xml(xml_file):
     tree = ET.parse(xml_file)
@@ -35,14 +34,16 @@ def parse_xml(xml_file):
 
         reset_value_elem = register.find('.//ipxact:reset/ipxact:value', namespace)
         reset_value = reset_value_elem.text if reset_value_elem is not None else "0x0"
+        
+        size_elem = register.find('ipxact:size', namespace)
+        size = int(size_elem.text) if size_elem is not None else 32  # 默认 32 位
 
-        registers.append((name, offset, access, desc, reset_value))
+        registers.append((name, offset, access, desc, reset_value, size))
 
     memory_map_name = root.find('.//ipxact:memoryMap/ipxact:name', namespace).text
     module_name = memory_map_name.split('_')[0]
 
     return registers, module_name
-
 
 # 生成寄存器结构体 C 代码
 def generate_struct_code(registers, module_name):
@@ -55,7 +56,7 @@ def generate_struct_code(registers, module_name):
     code += "typedef struct\n{\n"
 
     prev_offset = 0
-    for i, (name, offset, access, _, _) in enumerate(registers):
+    for i, (name, offset, access, _, _, _) in enumerate(registers):
         current_offset = int(offset, 16)
         if i > 0 and current_offset > prev_offset + 4:
             # 计算需要插入的保留寄存器数量
@@ -84,12 +85,11 @@ def generate_struct_code(registers, module_name):
 
     code += f"}} {module_name}_TypeDef;\n\n"
 
-    for name, offset, _, _, _ in registers:
+    for name, offset, _, _, _, _ in registers:
         code += f"#define {module_name}_{name}_OFFSET ({offset})\n"
 
     code += f"\n#endif /* {module_name}_H */\n"
     return code
-
 
 # 生成寄存器读写属性测试 C 代码
 def generate_test_code(registers, module_name, base_address):
@@ -118,43 +118,51 @@ def generate_test_code(registers, module_name, base_address):
 
     code += "void test_register_access(uint32_t base_addr) {\n"
     code += "    srand(time(NULL));\n"
-    for name, offset, access, _, reset_value in registers:
+    for name, offset, access, _, reset_value, size in registers:
         if access == "read-only":
-            code += f"    uint32_t rand_val = rand();\n"
-            code += f"    uint32_t reg_addr = base_addr + {offset};\n"
-            code += f"    write_reg(reg_addr, rand_val);\n"
-            code += f"    uint32_t read_val = read_reg(reg_addr);\n"
-            code += f"    if (read_val != {reset_value}) {{\n"
-            code += f"        printf(\"Error: Read - only register {name} write test failed!\\n\");\n"
-            code += "    }\n"
+            code += f"    {{\n"  # 添加代码块
+            code += f"        uint32_t rand_val = rand() & 0xFFFFFFFF >> (32 - {size});\n"  # 根据位宽生成随机数
+            code += f"        uint32_t reg_addr = base_addr + {offset};\n"
+            code += f"        write_reg(reg_addr, rand_val);\n"
+            code += f"        uint32_t read_val = read_reg(reg_addr);\n"
+            code += f"        if (read_val != {reset_value}) {{\n"
+            code += f"            printf(\"Error: Read-only register {name} write test failed!\\n\");\n"
+            code += "        }\n"
+            code += f"    }}\n"  # 结束代码块
         elif access == "read-write":
-            code += f"    uint32_t rand_val = rand();\n"
-            code += f"    uint32_t reg_addr = base_addr + {offset};\n"
-            code += f"    write_reg(reg_addr, rand_val);\n"
-            code += f"    uint32_t read_val = read_reg(reg_addr);\n"
-            code += f"    if (read_val != rand_val) {{\n"
-            code += f"        printf(\"Error: Read - write register {name} read - write test failed!\\n\");\n"
-            code += "    }\n"
+            code += f"    {{\n"  # 添加代码块
+            code += f"        uint32_t rand_val = rand() & 0xFFFFFFFF >> (32 - {size});\n"  # 根据位宽生成随机数
+            code += f"        uint32_t reg_addr = base_addr + {offset};\n"
+            code += f"        write_reg(reg_addr, rand_val);\n"
+            code += f"        uint32_t read_val = read_reg(reg_addr);\n"
+            code += f"        if (read_val != rand_val) {{\n"
+            code += f"            printf(\"Error: Read-write register {name} read-write test failed!\\n\");\n"
+            code += "        }\n"
+            code += f"    }}\n"  # 结束代码块
         elif access == "write-only":
-            code += f"    uint32_t rand_val = rand();\n"
-            code += f"    uint32_t reg_addr = base_addr + {offset};\n"
-            code += f"    write_reg(reg_addr, rand_val);\n"
-            code += f"    printf(\"Write - only register {name} written with value 0x%08X.\\n\", rand_val);\n"
+            code += f"    {{\n"  # 添加代码块
+            code += f"        uint32_t rand_val = rand() & 0xFFFFFFFF >> (32 - {size});\n"  # 根据位宽生成随机数
+            code += f"        uint32_t reg_addr = base_addr + {offset};\n"
+            code += f"        write_reg(reg_addr, rand_val);\n"
+            code += f"        printf(\"Write-only register {name} written with value 0x%08X.\\n\", rand_val);\n"
+            code += f"    }}\n"  # 结束代码块
         elif access == "reserved":
-            code += f"    uint32_t reg_addr = base_addr + {offset};\n"
-            code += f"    uint32_t read_val = read_reg(reg_addr);\n"
-            code += f"    if (read_val != 0) {{\n"
-            code += f"        printf(\"Error: Reserved register {name} read test failed!\\n\");\n"
-            code += "    }\n"
+            code += f"    {{\n"  # 添加代码块
+            code += f"        uint32_t reg_addr = base_addr + {offset};\n"
+            code += f"        uint32_t read_val = read_reg(reg_addr);\n"
+            code += f"        if (read_val != 0) {{\n"
+            code += f"            printf(\"Error: Reserved register {name} read test failed!\\n\");\n"
+            code += "        }\n"
+            code += f"    }}\n"  # 结束代码块
     code += "    printf(\"All register access tests completed.\\n\");\n"
     code += "}\n\n"
+
     code += "int main() {\n"
     code += f"    uint32_t base_addr = {base_address};\n"
     code += "    test_register_access(base_addr);\n"
     code += "    return 0;\n"
     code += "}\n"
     return code
-
 
 # 主函数
 def main():
@@ -180,7 +188,5 @@ def main():
     with open(f"{module_name}_test.c", "w") as f:
         f.write(test_code)
 
-
 if __name__ == "__main__":
     main()
-    
