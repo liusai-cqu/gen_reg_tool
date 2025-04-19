@@ -51,6 +51,8 @@ void write_reg(uint32_t address, uint32_t value) {
             address = reg["ADDRESS"]
             reset_value = reg.get("RESET_VALUE", "0x0")
             address_int = int(address, 16)
+            width = reg.get("WIDTH", 32)  # 获取寄存器位宽，默认 32 位
+            max_value = (1 << width) - 1  # 计算该位宽下的最大值
 
             # 生成寄存器测试逻辑
             code += f"    // Testing register: {reg_name}\n"
@@ -58,10 +60,10 @@ void write_reg(uint32_t address, uint32_t value) {
 
             if reg_type == "RW":
                 # Read-Write 测试逻辑
-                code += f"    uint32_t rand_val = rand();\n"
+                code += f"    uint32_t rand_val = rand() & {max_value};\n"
                 code += f"    write_reg(reg_addr, rand_val);\n"
                 code += f"    uint32_t read_val = read_reg(reg_addr);\n"
-                code += f"    if (read_val != rand_val) {{\n"
+                code += f"    if ((read_val & {max_value}) != rand_val) {{\n"
                 code += f"        printf(\"Error: Read-Write register {reg_name} failed!\\n\");\n"
                 code += f"    }} else {{\n"
                 code += f"        printf(\"{reg_name} passed Read-Write test.\\n\");\n"
@@ -69,10 +71,10 @@ void write_reg(uint32_t address, uint32_t value) {
 
             elif reg_type == "RO":
                 # Read-Only 新的测试逻辑：先写随机值，再读，确保返回复位值
-                code += f"    uint32_t rand_val = rand();\n"
+                code += f"    uint32_t rand_val = rand() & {max_value};\n"
                 code += f"    write_reg(reg_addr, rand_val); // Trying to write to Read-Only register\n"
                 code += f"    uint32_t read_val = read_reg(reg_addr);\n"
-                code += f"    if (read_val != {reset_value}) {{\n"
+                code += f"    if ((read_val & {max_value}) != int(reset_value, 16)) {{\n"
                 code += f"        printf(\"Error: Read-Only register {reg_name} failed! Expected: {reset_value}, Got: 0x%X\\n\", read_val);\n"
                 code += f"    }} else {{\n"
                 code += f"        printf(\"{reg_name} passed Read-Only test.\\n\");\n"
@@ -80,14 +82,14 @@ void write_reg(uint32_t address, uint32_t value) {
 
             elif reg_type == "WO":
                 # Write-Only 测试逻辑
-                code += f"    uint32_t rand_val = rand();\n"
+                code += f"    uint32_t rand_val = rand() & {max_value};\n"
                 code += f"    write_reg(reg_addr, rand_val);\n"
                 code += f"    printf(\"Write-Only register {reg_name} written successfully with value 0x%08X.\\n\", rand_val);\n\n"
 
             elif reg_type == "reserved":
                 # Reserved 寄存器测试逻辑
                 code += f"    uint32_t read_val = read_reg(reg_addr);\n"
-                code += f"    if (read_val != 0) {{\n"
+                code += f"    if ((read_val & {max_value}) != 0) {{\n"
                 code += f"        printf(\"Error: Reserved register {reg_name} is not zero as expected!\\n\");\n"
                 code += f"    }} else {{\n"
                 code += f"        printf(\"{reg_name} is correctly reserved.\\n\");\n"
