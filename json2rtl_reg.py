@@ -79,9 +79,9 @@ def generate_verilog(module_name, registers, apb_data_width):
             field_width = field["WIDTH"]
 
             if reg_type == "RO":
-                port_list += f"    input wire [{int(field_width) - 1}:0] {reg_name}_{field_name}_i,\n"
+                port_list += f"    input wire [{int(field_width) - 1}:0] {reg_name}_{field_name},\n"
             else:
-                port_list += f"    output wire [{int(field_width) - 1}:0] {reg_name}_{field_name}_o,\n"
+                port_list += f"    output wire [{int(field_width) - 1}:0] {reg_name}_{field_name},\n"
 
     # Remove the last comma and newline
     port_list = port_list.rstrip(",\n") + "\n"
@@ -171,10 +171,10 @@ module {module_name} (
 
             if reg_type == "RO":
                 # 对于 RO 寄存器，将输入值赋值给 register_data 的相应位
-                output_assignments += f" always @* begin register_data[{i}][{bit_offset + field_width - 1}:{bit_offset}] = {reg_name}_{field_name}_i; end\n"
+                output_assignments += f" always @* begin register_data[{i}][{bit_offset + field_width - 1}:{bit_offset}] = {reg_name}_{field_name}; end\n"
             else:
                 # 对于 RW 寄存器，将 register_data 的相应位赋值给输出
-                output_assignments += f" assign {reg_name}_{field_name}_o = register_data[{i}][{bit_offset + field_width - 1}:{bit_offset}];\n"
+                output_assignments += f" assign {reg_name}_{field_name} = register_data[{i}][{bit_offset + field_width - 1}:{bit_offset}];\n"
 
             # 更新下一个字段的起始位
             bit_offset += field_width
